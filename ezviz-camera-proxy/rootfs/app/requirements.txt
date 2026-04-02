@@ -1,0 +1,5 @@
+pyezvizapi>=0.16.0
+flask>=3.0.0
+Pillow>=10.0.0
+requests>=2.31.0
+paho-mqtt>=2.0.0

@@ -1,0 +1,41 @@
+configuration:
+  ezviz_username:
+    name: Ezviz Username
+    description: >-
+      Your Ezviz account email address. This is the same login you use
+      in the Ezviz mobile app.
+  ezviz_password:
+    name: Ezviz Password
+    description: >-
+      Your Ezviz account password. Stored securely and never logged.
+  ezviz_region:
+    name: Ezviz API Region
+    description: >-
+      The Ezviz API region endpoint. Use the default for most European accounts.
+      North America: apiusa.ezvizlife.com. EU: apiieu.ezvizlife.com.
+      China: api.ezvizlife.com.
+  camera_serial:
+    name: Camera Serial Number
+    description: >-
+      The serial number of your Ezviz HP2 camera. Found on the label on
+      the back of the device or in the Ezviz app under Device Info.
+      Format: 9-character alphanumeric, e.g. "AB1234567".
+  camera_password:
+    name: Camera Verification Code
+    description: >-
+      The 6-digit verification code for your camera (also called "Device
+      Password"). Found on the label on the back of the HP2. Required for
+      accessing camera streams and snapshots.
+  snapshot_interval:
+    name: Snapshot Interval (seconds)
+    description: >-
+      How often (in seconds) the add-on fetches a new snapshot from the
+      Ezviz Cloud. Minimum 5, maximum 300 seconds. Lower values increase
+      responsiveness but use more cloud API bandwidth. Recommended: 30.
+  enable_mqtt_events:
+    name: Enable MQTT Events
+    description: >-
+      When enabled, the add-on publishes doorbell and motion events to your
+      Home Assistant MQTT broker. Requires MQTT to be configured in HA.
+      Event topics: homeassistant/camera/ezviz/{serial}/motion and
+      homeassistant/camera/ezviz/{serial}/doorbell.

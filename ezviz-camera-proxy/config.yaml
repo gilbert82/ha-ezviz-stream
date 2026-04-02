@@ -1,0 +1,40 @@
+name: "Ezviz Camera Proxy"
+version: "1.0.0"
+slug: ezviz-camera-proxy
+description: "Proxy für Ezviz Kameras (inkl. HP2) die kein RTSP unterstützen. Nutzt die Ezviz Cloud API für Snapshots, Events und optionalen Live-Stream."
+url: "https://github.com/g-stuecheli/ha-ezviz-stream"
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - armhf
+  - i386
+startup: application
+boot: auto
+ingress: true
+ingress_port: 8099
+ingress_entry: /
+panel_icon: mdi:doorbell-video
+panel_title: Ezviz Camera
+homeassistant_api: true
+hassio_api: true
+map:
+  - type: share
+    read_only: false
+options:
+  ezviz_username: ""
+  ezviz_password: ""
+  ezviz_region: "apiieu.ezvizlife.com"
+  camera_serial: ""
+  camera_password: ""
+  snapshot_interval: 30
+  enable_mqtt_events: true
+schema:
+  ezviz_username: str
+  ezviz_password: password
+  ezviz_region: "str?"
+  camera_serial: str
+  camera_password: password
+  snapshot_interval: "int(5,300)"
+  enable_mqtt_events: bool
+init: false

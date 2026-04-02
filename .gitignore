@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+generate_icons.py
+*.egg-info/
+dist/
+build/

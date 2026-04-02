@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Ezviz Camera — {{ camera_serial or 'Not Configured' }}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    /* HA Ingress dark theme */
+    :root {
+      --ha-card-bg: #1c1c1e;
+      --ha-bg: #111113;
+      --ha-border: #2d2d30;
+      --ha-accent: #3b82f6;
+      --ha-accent-hover: #2563eb;
+      --ha-success: #22c55e;
+      --ha-warning: #f59e0b;
+      --ha-danger: #ef4444;
+      --ha-text: #e5e7eb;
+      --ha-text-muted: #9ca3af;
+    }
+    body {
+      background-color: var(--ha-bg);
+      color: var(--ha-text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    .card {
+      background-color: var(--ha-card-bg);
+      border: 1px solid var(--ha-border);
+      border-radius: 12px;
+    }
+    .status-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+    .status-dot.online  { background: var(--ha-success); box-shadow: 0 0 6px var(--ha-success); }
+    .status-dot.offline { background: var(--ha-danger);  box-shadow: 0 0 6px var(--ha-danger);  }
+    .status-dot.unknown { background: var(--ha-text-muted); }
+    #stream-img {
+      width: 100%;
+      max-height: 480px;
+      object-fit: contain;
+      background: #0a0a0c;
+      border-radius: 8px;
+    }
+    .btn-primary {
+      background: var(--ha-accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 18px;
+      cursor: pointer;
+      font-size: 14px;
+      transition: background 0.2s;
+    }
+    .btn-primary:hover { background: var(--ha-accent-hover); }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .event-row { border-bottom: 1px solid var(--ha-border); }
+    .event-row:last-child { border-bottom: none; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-size: 11px;
+      font-weight: 600;
+    }
+    .badge-motion   { background: rgba(245,158,11,0.15); color: var(--ha-warning); }
+    .badge-doorbell { background: rgba(59,130,246,0.15); color: var(--ha-accent); }
+    .badge-other    { background: rgba(156,163,175,0.15); color: var(--ha-text-muted); }
+    progress {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100%;
+      height: 8px;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    progress::-webkit-progress-bar   { background: var(--ha-border); border-radius: 4px; }
+    progress::-webkit-progress-value { background: var(--ha-accent); border-radius: 4px; }
+    progress::-moz-progress-bar      { background: var(--ha-accent); border-radius: 4px; }
+    .spinner {
+      width: 18px; height: 18px;
+      border: 2px solid rgba(255,255,255,0.2);
+      border-top-color: #fff;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .toast {
+      position: fixed; bottom: 24px; right: 24px;
+      background: var(--ha-card-bg);
+      border: 1px solid var(--ha-border);
+      border-radius: 10px;
+      padding: 12px 20px;
+      font-size: 14px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+      z-index: 9999;
+      transition: opacity 0.4s;
+      opacity: 0;
+      pointer-events: none;
+    }
+    .toast.show { opacity: 1; }
+    .toast.success { border-color: var(--ha-success); color: var(--ha-success); }
+    .toast.error   { border-color: var(--ha-danger);  color: var(--ha-danger); }
+  </style>
+</head>
+<body class="min-h-screen p-4">
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-6">
+    <div class="flex items-center gap-3">
+      <svg class="w-8 h-8 text-blue-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M15 10l4.553-2.069A1 1 0 0121 8.882v6.236a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+      </svg>
+      <div>
+        <h1 class="text-xl font-bold leading-tight" style="color:var(--ha-text)">Ezviz HP2 Dashboard</h1>
+        <p class="text-xs" style="color:var(--ha-text-muted)">
+          Serial: <span class="font-mono">{{ camera_serial or '—' }}</span>
+        </p>
+      </div>
+    </div>
+    <div id="connection-badge" class="flex items-center gap-2 text-sm">
+      <span class="status-dot unknown" id="online-dot"></span>
+      <span id="online-label" style="color:var(--ha-text-muted)">Connecting…</span>
+    </div>
+  </div>
+
+  {% if snapshot_error %}
+  <div class="card p-4 mb-4 border-red-800 text-sm" style="color:var(--ha-danger)">
+    <strong>Snapshot error:</strong> {{ snapshot_error }}
+  </div>
+  {% endif %}
+
+  {% if status_error %}
+  <div class="card p-4 mb-4 border-yellow-700 text-sm" style="color:var(--ha-warning)">
+    <strong>Status error:</strong> {{ status_error }}
+  </div>
+  {% endif %}
+
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+    <!-- Camera Feed (left/top, spans 2 cols on large screens) -->
+    <div class="card p-4 lg:col-span-2">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide" style="color:var(--ha-text-muted)">Live View</h2>
+        <div class="flex items-center gap-3">
+          <span class="text-xs" style="color:var(--ha-text-muted)">
+            Auto-refresh: <span class="font-mono" id="countdown">{{ snapshot_interval }}</span>s
+          </span>
+          <button class="btn-primary flex items-center gap-2" id="refresh-btn" onclick="manualRefresh()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                d="M4 4v5h5M20 20v-5h-5M4 9a8 8 0 0114.93-2.93M20 15a8 8 0 01-14.93 2.93"/>
+            </svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Stream / Snapshot image -->
+      <div class="relative">
+        <img
+          id="stream-img"
+          src="{{ ingress_url('/api/snapshot') }}"
+          alt="Camera snapshot"
+          onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%22640%22 height=%22360%22><rect width=%22640%22 height=%22360%22 fill=%22%230a0a0c%22/><text x=%22320%22 y=%22180%22 text-anchor=%22middle%22 fill=%22%239ca3af%22 font-size=%2218%22>No image available</text></svg>'"
+        />
+        <div id="refresh-overlay"
+          class="absolute inset-0 flex items-center justify-center rounded-lg"
+          style="background:rgba(0,0,0,0.5); display:none !important;">
+          <span class="spinner"></span>
+        </div>
+      </div>
+
+      <p class="text-xs mt-2" style="color:var(--ha-text-muted)">
+        Last updated: <span id="last-updated">{{ last_snapshot_time or 'Never' }}</span>
+        &nbsp;·&nbsp;
+        <a href="{{ ingress_url('/api/stream') }}" target="_blank"
+           class="underline" style="color:var(--ha-accent)">
+          Open MJPEG Stream ↗
+        </a>
+      </p>
+    </div>
+
+    <!-- Status Panel (right column) -->
+    <div class="flex flex-col gap-4">
+
+      <!-- Camera Status -->
+      <div class="card p-4">
+        <h2 class="font-semibold text-sm uppercase tracking-wide mb-3" style="color:var(--ha-text-muted)">Status</h2>
+        <div id="status-container">
+          {% if status %}
+          <div class="space-y-3 text-sm">
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">Online</span>
+              <span>
+                {% if status.online %}
+                  <span class="status-dot online mr-1"></span> Yes
+                {% else %}
+                  <span class="status-dot offline mr-1"></span> No
+                {% endif %}
+              </span>
+            </div>
+            {% if status.battery_level is not none %}
+            <div>
+              <div class="flex justify-between mb-1">
+                <span style="color:var(--ha-text-muted)">Battery</span>
+                <span>{{ status.battery_level }}%</span>
+              </div>
+              <progress value="{{ status.battery_level }}" max="100"></progress>
+            </div>
+            {% endif %}
+            {% if status.wifi_signal is not none %}
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">WiFi Signal</span>
+              <span>{{ status.wifi_signal }} dBm</span>
+            </div>
+            {% endif %}
+            {% if status.is_sleeping is not none %}
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">Sleeping</span>
+              <span>{{ 'Yes' if status.is_sleeping else 'No' }}</span>
+            </div>
+            {% endif %}
+            {% if status.version %}
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">Firmware</span>
+              <span class="font-mono text-xs">{{ status.version }}</span>
+            </div>
+            {% endif %}
+          </div>
+          {% else %}
+          <p class="text-sm" style="color:var(--ha-text-muted)">Loading status…</p>
+          {% endif %}
+        </div>
+      </div>
+
+      <!-- HA Integration tip -->
+      <div class="card p-4">
+        <h2 class="font-semibold text-sm uppercase tracking-wide mb-2" style="color:var(--ha-text-muted)">HA Camera URL</h2>
+        <p class="text-xs mb-2" style="color:var(--ha-text-muted)">
+          Use in <em>Generic Camera</em> integration:
+        </p>
+        <code class="text-xs break-all block p-2 rounded"
+              style="background:rgba(255,255,255,0.05); color:var(--ha-accent); font-family:monospace;">
+          http://localhost:8099/api/snapshot
+        </code>
+        <p class="text-xs mt-2" style="color:var(--ha-text-muted)">
+          Or for MJPEG:
+        </p>
+        <code class="text-xs break-all block p-2 rounded"
+              style="background:rgba(255,255,255,0.05); color:var(--ha-accent); font-family:monospace;">
+          http://localhost:8099/api/stream
+        </code>
+      </div>
+
+    </div>
+
+    <!-- Events / Alarms (full width) -->
+    <div class="card p-4 lg:col-span-3">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="font-semibold text-sm uppercase tracking-wide" style="color:var(--ha-text-muted)">Recent Events</h2>
+        <a href="{{ ingress_url('/api/events') }}" class="text-xs underline" style="color:var(--ha-accent)">
+          JSON ↗
+        </a>
+      </div>
+      <div id="events-container">
+        {% if events %}
+        <div class="divide-y" style="border-color: var(--ha-border)">
+          {% for event in events %}
+          <div class="event-row py-3 flex items-center justify-between text-sm">
+            <div class="flex items-center gap-3">
+              <span class="badge
+                {%- if 'motion' in (event.alarm_type or '') | lower %} badge-motion
+                {%- elif 'doorbell' in (event.alarm_type or '') | lower or 'bell' in (event.alarm_type or '') | lower %} badge-doorbell
+                {%- else %} badge-other{%- endif %}">
+                {{ event.alarm_type or 'Event' }}
+              </span>
+              <span style="color:var(--ha-text)">
+                {{ event.alarm_time or '—' }}
+              </span>
+            </div>
+            {% if event.alarm_pic_url %}
+            <a href="{{ event.alarm_pic_url }}" target="_blank"
+               class="text-xs underline" style="color:var(--ha-accent)">
+              View image ↗
+            </a>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-sm" style="color:var(--ha-text-muted)">No events yet. Events appear here when motion or doorbell is detected.</p>
+        {% endif %}
+      </div>
+    </div>
+
+  </div>
+
+  <!-- Footer -->
+  <div class="mt-6 text-center text-xs" style="color:var(--ha-text-muted)">
+    Ezviz Camera Proxy v1.0.0
+    &nbsp;·&nbsp;
+    <a href="{{ ingress_url('/api/health') }}" class="underline" style="color:var(--ha-accent)">Health</a>
+    &nbsp;·&nbsp;
+    <a href="{{ ingress_url('/api/status') }}" class="underline" style="color:var(--ha-accent)">Status JSON</a>
+    &nbsp;·&nbsp;
+    <a href="https://github.com/g-stuecheli/ha-ezviz-stream" target="_blank"
+       class="underline" style="color:var(--ha-accent)">GitHub ↗</a>
+  </div>
+
+  <!-- Toast notification -->
+  <div class="toast" id="toast"></div>
+
+  <script>
+    // -----------------------------------------------------------------------
+    // Configuration (injected from Flask)
+    // -----------------------------------------------------------------------
+    const SNAPSHOT_INTERVAL = {{ snapshot_interval }} * 1000;
+    const INGRESS_ENTRY = {{ ingress_entry | tojson }};
+
+    function url(path) {
+      const base = (INGRESS_ENTRY || '').replace(/\/+$/, '');
+      return base + path;
+    }
+
+    // -----------------------------------------------------------------------
+    // Toast
+    // -----------------------------------------------------------------------
+    function showToast(msg, type='success') {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast ' + type + ' show';
+      setTimeout(() => { t.classList.remove('show'); }, 3000);
+    }
+
+    // -----------------------------------------------------------------------
+    // Snapshot refresh
+    // -----------------------------------------------------------------------
+    let countdown = {{ snapshot_interval }};
+    let countdownTimer;
+    let refreshing = false;
+
+    function updateCountdown() {
+      document.getElementById('countdown').textContent = countdown;
+      if (countdown <= 0) {
+        refreshSnapshot(false);
+        countdown = {{ snapshot_interval }};
+      } else {
+        countdown--;
+      }
+    }
+
+    function startCountdown() {
+      clearInterval(countdownTimer);
+      countdown = {{ snapshot_interval }};
+      countdownTimer = setInterval(updateCountdown, 1000);
+    }
+
+    function refreshSnapshot(manual = true) {
+      if (refreshing) return;
+      refreshing = true;
+
+      const img = document.getElementById('stream-img');
+      const btn = document.getElementById('refresh-btn');
+      const overlay = document.getElementById('refresh-overlay');
+
+      btn.disabled = true;
+      if (overlay) overlay.style.display = 'flex';
+
+      fetch(url('/api/snapshot/refresh'), { method: 'POST' })
+        .then(r => r.json())
+        .then(data => {
+          if (data.success) {
+            // Cache-bust the image src
+            img.src = url('/api/snapshot') + '?t=' + Date.now();
+            document.getElementById('last-updated').textContent = new Date(data.timestamp + 'Z').toLocaleString();
+            if (manual) showToast('Snapshot refreshed');
+          } else {
+            if (manual) showToast('Refresh failed: ' + data.error, 'error');
+          }
+        })
+        .catch(e => {
+          if (manual) showToast('Network error: ' + e.message, 'error');
+        })
+        .finally(() => {
+          refreshing = false;
+          btn.disabled = false;
+          if (overlay) overlay.style.display = 'none';
+          if (manual) startCountdown();
+        });
+    }
+
+    function manualRefresh() {
+      refreshSnapshot(true);
+    }
+
+    // -----------------------------------------------------------------------
+    // Status polling
+    // -----------------------------------------------------------------------
+    function pollStatus() {
+      fetch(url('/api/status'))
+        .then(r => r.json())
+        .then(data => {
+          const dot   = document.getElementById('online-dot');
+          const label = document.getElementById('online-label');
+
+          if (data.error) {
+            dot.className   = 'status-dot unknown';
+            label.textContent = 'Error';
+            label.style.color = 'var(--ha-danger)';
+          } else {
+            dot.className = 'status-dot ' + (data.online ? 'online' : 'offline');
+            label.textContent = data.online ? 'Online' : 'Offline';
+            label.style.color = data.online ? 'var(--ha-success)' : 'var(--ha-danger)';
+          }
+        })
+        .catch(() => {});
+    }
+
+    // -----------------------------------------------------------------------
+    // Events polling
+    // -----------------------------------------------------------------------
+    function pollEvents() {
+      fetch(url('/api/events'))
+        .then(r => r.json())
+        .then(data => {
+          if (!data.events || !data.events.length) return;
+          const container = document.getElementById('events-container');
+          let html = '<div class="divide-y" style="border-color:var(--ha-border)">';
+          for (const e of data.events) {
+            let badgeClass = 'badge-other';
+            if ((e.alarm_type||'').toLowerCase().includes('motion'))   badgeClass = 'badge-motion';
+            if ((e.alarm_type||'').toLowerCase().includes('doorbell') ||
+                (e.alarm_type||'').toLowerCase().includes('bell'))     badgeClass = 'badge-doorbell';
+            html += `<div class="event-row py-3 flex items-center justify-between text-sm">
+              <div class="flex items-center gap-3">
+                <span class="badge ${badgeClass}">${e.alarm_type || 'Event'}</span>
+                <span style="color:var(--ha-text)">${e.alarm_time || '—'}</span>
+              </div>
+              ${e.alarm_pic_url
+                ? `<a href="${e.alarm_pic_url}" target="_blank" class="text-xs underline" style="color:var(--ha-accent)">View image ↗</a>`
+                : ''}
+            </div>`;
+          }
+          html += '</div>';
+          container.innerHTML = html;
+        })
+        .catch(() => {});
+    }
+
+    // -----------------------------------------------------------------------
+    // Startup
+    // -----------------------------------------------------------------------
+    document.addEventListener('DOMContentLoaded', () => {
+      startCountdown();
+      pollStatus();
+      pollEvents();
+
+      // Poll status every 30s, events every 60s
+      setInterval(pollStatus, 30000);
+      setInterval(pollEvents, 60000);
+    });
+  </script>
+</body>
+</html>
