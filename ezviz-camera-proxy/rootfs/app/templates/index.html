@@ -214,16 +214,28 @@
               <progress value="{{ status.battery_level }}" max="100"></progress>
             </div>
             {% endif %}
-            {% if status.wifi_signal is not none %}
+            {% if status.local_ip %}
             <div class="flex justify-between">
-              <span style="color:var(--ha-text-muted)">WiFi Signal</span>
-              <span>{{ status.wifi_signal }} dBm</span>
+              <span style="color:var(--ha-text-muted)">Local IP</span>
+              <span class="font-mono text-xs">{{ status.local_ip }}</span>
             </div>
             {% endif %}
             {% if status.is_sleeping is not none %}
             <div class="flex justify-between">
               <span style="color:var(--ha-text-muted)">Sleeping</span>
               <span>{{ 'Yes' if status.is_sleeping else 'No' }}</span>
+            </div>
+            {% endif %}
+            {% if status.last_alarm_type %}
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">Last Event</span>
+              <span>{{ status.last_alarm_type }}</span>
+            </div>
+            {% endif %}
+            {% if status.device_sub_category %}
+            <div class="flex justify-between">
+              <span style="color:var(--ha-text-muted)">Model</span>
+              <span>{{ status.device_sub_category }}</span>
             </div>
             {% endif %}
             {% if status.version %}

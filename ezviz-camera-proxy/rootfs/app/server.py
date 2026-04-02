@@ -19,7 +19,7 @@ import logging
 import os
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from flask import (
@@ -110,6 +110,8 @@ def _snapshot_worker():
     # Initial delay to allow app startup
     time.sleep(5)
 
+    consecutive_errors = 0
+
     while True:
         try:
             client = get_client()
@@ -119,29 +121,35 @@ def _snapshot_worker():
                 logger.info("Snapshot worker: logging in...")
                 client.login()
 
+            # Fetch status first (lighter call, also provides last_alarm_pic)
+            try:
+                _last_status = client.get_device_status()
+                _status_error = ""
+                consecutive_errors = 0
+                logger.debug("Status updated: online=%s, battery=%s",
+                             _last_status.get('online'), _last_status.get('battery_level'))
+            except EzvizDeviceError as e:
+                _status_error = str(e)
+                logger.error("Status fetch failed: %s", e)
+                consecutive_errors += 1
+
             # Fetch snapshot
             try:
                 img_bytes = client.get_snapshot()
                 if img_bytes:
                     with open(CURRENT_SNAPSHOT_FILE, "wb") as f:
                         f.write(img_bytes)
-                    _last_snapshot_time = datetime.utcnow()
+                    _last_snapshot_time = datetime.now(timezone.utc)
                     _snapshot_error = ""
+                    consecutive_errors = 0
                     logger.debug("Snapshot saved (%d bytes)", len(img_bytes))
                 else:
-                    _snapshot_error = "Snapshot returned empty data"
+                    _snapshot_error = "Snapshot returned empty data — camera may be in sleep mode"
                     logger.warning(_snapshot_error)
             except EzvizDeviceError as e:
                 _snapshot_error = str(e)
                 logger.error("Snapshot failed: %s", e)
-
-            # Fetch status
-            try:
-                _last_status = client.get_device_status()
-                _status_error = ""
-            except EzvizDeviceError as e:
-                _status_error = str(e)
-                logger.error("Status fetch failed: %s", e)
+                consecutive_errors += 1
 
             # Fetch recent events
             try:
@@ -152,13 +160,26 @@ def _snapshot_worker():
         except EzvizAuthError as e:
             _snapshot_error = f"Auth error: {e}"
             logger.error("Auth error in snapshot worker: %s", e)
+            consecutive_errors += 1
+            # Force re-login on next cycle
+            client = get_client()
+            client.invalidate_session()
             time.sleep(60)  # Back off on auth errors
+            continue
 
         except Exception as e:
             _snapshot_error = f"Unexpected error: {e}"
             logger.exception("Unexpected error in snapshot worker: %s", e)
+            consecutive_errors += 1
 
-        time.sleep(SNAPSHOT_INTERVAL)
+        # Back off if we're seeing many consecutive errors
+        if consecutive_errors > 5:
+            backoff = min(300, SNAPSHOT_INTERVAL * consecutive_errors)
+            logger.warning("Many consecutive errors (%d), backing off %ds",
+                          consecutive_errors, backoff)
+            time.sleep(backoff)
+        else:
+            time.sleep(SNAPSHOT_INTERVAL)
 
 
 # Start background thread
@@ -187,7 +208,7 @@ def _placeholder_image() -> bytes:
         draw.rectangle([0, 0, 640, 360], outline=(60, 100, 180), width=4)
         draw.text((50, 140), "Ezviz HP2", fill=(100, 150, 255))
         draw.text((50, 180), "Fetching snapshot...", fill=(180, 180, 180))
-        draw.text((50, 220), datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC"), fill=(120, 120, 120))
+        draw.text((50, 220), datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC"), fill=(120, 120, 120))
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=85)
         return buf.getvalue()
@@ -276,7 +297,7 @@ def api_snapshot_refresh():
         if img_bytes:
             with open(CURRENT_SNAPSHOT_FILE, "wb") as f:
                 f.write(img_bytes)
-            _last_snapshot_time = datetime.utcnow()
+            _last_snapshot_time = datetime.now(timezone.utc)
             _snapshot_error = ""
             return jsonify({
                 "success": True,
