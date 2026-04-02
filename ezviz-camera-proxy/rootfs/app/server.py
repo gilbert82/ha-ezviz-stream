@@ -126,8 +126,10 @@ def _snapshot_worker():
                 _last_status = client.get_device_status()
                 _status_error = ""
                 consecutive_errors = 0
-                logger.debug("Status updated: online=%s, battery=%s",
-                             _last_status.get('online'), _last_status.get('battery_level'))
+                logger.info("Status updated: online=%s, battery=%s, alarm_pic=%s",
+                            _last_status.get('online'),
+                            _last_status.get('battery_level'),
+                            _last_status.get('last_alarm_pic', '')[:80] or 'none')
             except EzvizDeviceError as e:
                 _status_error = str(e)
                 logger.error("Status fetch failed: %s", e)

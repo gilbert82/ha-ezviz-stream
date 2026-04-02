@@ -216,6 +216,26 @@ class EzvizClient:
                         pass
 
         self._cached_device_data = result
+
+        # Log device data structure on first successful fetch for debugging
+        if not hasattr(self, '_logged_structure'):
+            self._logged_structure = True
+            logger.info("=== Pagelist top-level keys: %s ===", list(pages.keys()))
+            logger.info("=== deviceInfos fields for %s: %s ===",
+                        serial, list(device_info.keys()) if isinstance(device_info, dict) else "N/A")
+            # Log all string values in deviceInfos that might be URLs
+            for k, v in device_info.items():
+                if isinstance(v, str) and (v.startswith("http") or "pic" in k.lower() or "url" in k.lower() or "image" in k.lower()):
+                    logger.info("  deviceInfos[%s] = %s", k, v[:200])
+            # Log STATUS keys
+            logger.info("=== STATUS fields: %s ===",
+                        list(result["STATUS"].keys()) if isinstance(result["STATUS"], dict) else "N/A")
+            # Log any URL fields in STATUS
+            if isinstance(result["STATUS"], dict):
+                for k, v in result["STATUS"].items():
+                    if isinstance(v, str) and (v.startswith("http") or "pic" in k.lower() or "url" in k.lower()):
+                        logger.info("  STATUS[%s] = %s", k, v[:200])
+
         return result
 
     # ------------------------------------------------------------------
@@ -319,28 +339,51 @@ class EzvizClient:
     def get_snapshot(self) -> bytes | None:
         """
         Fetch the latest snapshot image.
-        Strategy:
-        1. Download the last_alarm_pic URL from status/alarminfo
-        2. Try capture_picture API
-        3. Try device_messages_list for recent event images
+        Strategies (tried in order):
+        0. picUrl from deviceInfos in pagelist (device cover image)
+        1. last_alarm_pic from alarminfo API
+        2. capture_picture API (wakes camera)
+        3. device_messages_list for recent event images
+        4. cached alarm pic from last status call
         """
         with self._lock:
             try:
                 self._ensure_authenticated()
 
+                # Strategy 0: Device cover image (picUrl in deviceInfos)
+                device_pic = self._get_device_pic_url()
+                if device_pic:
+                    logger.info("Strategy 0: trying device picUrl: %s", device_pic[:120])
+                    img = self._download_image(device_pic)
+                    if img:
+                        logger.info("Snapshot from device picUrl: %d bytes", len(img))
+                        return img
+                    else:
+                        logger.info("Strategy 0: device picUrl download failed or empty")
+                else:
+                    logger.info("Strategy 0: no picUrl in device data")
+
                 # Strategy 1: Get last alarm picture from alarminfo API
                 pic_url = self._get_latest_alarm_pic()
                 if pic_url:
+                    logger.info("Strategy 1: trying alarm pic: %s", pic_url[:120])
                     img = self._download_image(pic_url)
                     if img:
-                        logger.debug("Snapshot from alarm pic: %d bytes", len(img))
+                        logger.info("Snapshot from alarm pic: %d bytes", len(img))
                         return img
+                    else:
+                        logger.info("Strategy 1: alarm pic download failed or empty")
+                else:
+                    logger.info("Strategy 1: no alarm pic URL available")
 
                 # Strategy 2: Try capture_picture API
                 try:
+                    logger.info("Strategy 2: trying capture_picture API...")
                     result = self._client.capture_picture(
                         serial=self.camera_serial, channel=1
                     )
+                    logger.info("Strategy 2: capture_picture returned: %s",
+                                str(result)[:300] if result else "None")
                     if isinstance(result, dict):
                         cap_url = (
                             result.get("picUrl")
@@ -351,21 +394,25 @@ class EzvizClient:
                         if cap_url:
                             img = self._download_image(cap_url)
                             if img:
-                                logger.debug(
-                                    "Snapshot from capture: %d bytes", len(img)
-                                )
+                                logger.info("Snapshot from capture: %d bytes", len(img))
                                 return img
+                            else:
+                                logger.info("Strategy 2: capture pic download failed")
                 except Exception as e:
-                    logger.debug("capture_picture not available: %s", e)
+                    logger.info("Strategy 2: capture_picture failed: %s", e)
 
                 # Strategy 3: Device messages list
                 try:
+                    logger.info("Strategy 3: trying device_messages_list...")
                     msgs = self._client.get_device_messages_list(
                         serials=self.camera_serial, limit=5
                     )
+                    logger.info("Strategy 3: messages response keys: %s",
+                                list(msgs.keys()) if isinstance(msgs, dict) else type(msgs))
                     messages = msgs.get("message") or msgs.get("messages") or []
                     if isinstance(messages, list):
-                        for msg in messages:
+                        logger.info("Strategy 3: found %d messages", len(messages))
+                        for i, msg in enumerate(messages):
                             if not isinstance(msg, dict):
                                 continue
                             msg_pic = (
@@ -374,24 +421,31 @@ class EzvizClient:
                                 or ""
                             )
                             if msg_pic:
+                                logger.info("Strategy 3: message[%d] pic: %s", i, msg_pic[:120])
                                 img = self._download_image(msg_pic)
                                 if img:
-                                    logger.debug(
-                                        "Snapshot from message: %d bytes", len(img)
-                                    )
+                                    logger.info("Snapshot from message: %d bytes", len(img))
                                     return img
+                        logger.info("Strategy 3: no usable picture in messages")
+                    else:
+                        logger.info("Strategy 3: messages list empty or not a list")
                 except Exception as e:
-                    logger.debug("Messages list fallback failed: %s", e)
+                    logger.info("Strategy 3: messages list failed: %s", e)
 
                 # Strategy 4: Use cached alarm pic from last status
                 cached_pic = self._cached_status.get("last_alarm_pic", "")
                 if cached_pic:
+                    logger.info("Strategy 4: trying cached alarm pic: %s", cached_pic[:120])
                     img = self._download_image(cached_pic)
                     if img:
-                        logger.debug("Snapshot from cached status: %d bytes", len(img))
+                        logger.info("Snapshot from cached status: %d bytes", len(img))
                         return img
+                    else:
+                        logger.info("Strategy 4: cached pic download failed")
+                else:
+                    logger.info("Strategy 4: no cached alarm pic")
 
-                logger.warning("No snapshot source available")
+                logger.warning("All 5 snapshot strategies failed — no image available")
                 return None
 
             except EzvizDeviceError:
@@ -400,6 +454,28 @@ class EzvizClient:
                 logger.error("get_snapshot failed: %s", e)
                 self._client = None
                 raise EzvizDeviceError(f"Snapshot fetch failed: {e}") from e
+
+    def _get_device_pic_url(self) -> str:
+        """Get the device's cover/status picture URL from cached pagelist data."""
+        dev_info = self._cached_device_data.get("deviceInfos", {})
+        if not isinstance(dev_info, dict):
+            return ""
+
+        # Try various known picture URL fields
+        for key in ("picUrl", "devicePicUrl", "statusPicUrl", "coverUrl"):
+            url = dev_info.get(key, "")
+            if url and isinstance(url, str) and url.startswith("http"):
+                return url
+
+        # Check in STATUS section
+        status = self._cached_device_data.get("STATUS", {})
+        if isinstance(status, dict):
+            for key in ("picUrl", "devicePicUrl"):
+                url = status.get(key, "")
+                if url and isinstance(url, str) and url.startswith("http"):
+                    return url
+
+        return ""
 
     def _get_latest_alarm_pic(self) -> str:
         """Get the URL of the latest alarm picture."""
