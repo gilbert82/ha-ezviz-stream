@@ -37,7 +37,7 @@ Ezviz account.
 In Home Assistant, go to **Settings → Add-ons → Add-on Store → ⋮ Menu → Repositories** and add:
 
 ```
-https://github.com/g-stuecheli/ha-ezviz-stream
+https://github.com/gilbert82/ha-ezviz-stream
 ```
 
 ### Step 2: Install Add-on
@@ -226,4 +226,4 @@ automation:
 - [Ezviz Open Platform (HLS/RTMP)](https://open.ys7.com/help/en/489)
 - [HP2 RTSP community thread](https://community.home-assistant.io/t/ezviz-cameras-rtsp-stream-not-working/523726?page=4)
 - [HP2 snapshot GitHub issue](https://github.com/home-assistant/core/issues/134292)
-- [Add-on GitHub Repository](https://github.com/g-stuecheli/ha-ezviz-stream)
+- [Add-on GitHub Repository](https://github.com/gilbert82/ha-ezviz-stream)

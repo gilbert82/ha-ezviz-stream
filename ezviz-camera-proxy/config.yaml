@@ -2,7 +2,7 @@ name: "Ezviz Camera Proxy"
 version: "1.0.0"
 slug: ezviz-camera-proxy
 description: "Proxy für Ezviz Kameras (inkl. HP2) die kein RTSP unterstützen. Nutzt die Ezviz Cloud API für Snapshots, Events und optionalen Live-Stream."
-url: "https://github.com/g-stuecheli/ha-ezviz-stream"
+url: "https://github.com/gilbert82/ha-ezviz-stream"
 arch:
   - amd64
   - aarch64
